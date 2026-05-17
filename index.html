@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Braille Scan Translator</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="workspace" aria-label="Braille translation workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Printed Braille OCR</p>
+            <h1>Braille Scan Translator</h1>
+          </div>
+          <div class="actions">
+            <button id="demoButton" type="button" title="Load a sample Braille image">Demo</button>
+            <label class="file-button" title="Upload a scanned Braille image">
+              <input id="imageInput" type="file" accept="image/*">
+              Upload
+            </label>
+          </div>
+        </header>
+
+        <section class="tool-grid">
+          <aside class="controls" aria-label="Scan controls">
+            <div class="control-block">
+              <h2>Image Scan Options</h2>
+              <label>
+                Braille print
+                <select id="polarity">
+                  <option value="light">White Braille print</option>
+                  <option value="dark">Dark Braille print</option>
+                </select>
+              </label>
+              <label class="check-option">
+                <input id="showBoxes" type="checkbox" checked>
+                <span>Show Braille cell boxes</span>
+              </label>
+              <label class="check-option">
+                <input id="doubleSided" type="checkbox">
+                <span>Process double-sided Braille</span>
+              </label>
+              <label>
+                Threshold
+                <input id="threshold" type="range" min="20" max="235" value="90">
+                <span id="thresholdValue">90</span>
+              </label>
+              <label>
+                Minimum dot size
+                <input id="minArea" type="range" min="4" max="250" value="8">
+                <span id="minAreaValue">8 px</span>
+              </label>
+              <label>
+                Maximum dot size
+                <input id="maxArea" type="range" min="20" max="1400" value="900">
+                <span id="maxAreaValue">900 px</span>
+              </label>
+            </div>
+
+            <div class="control-block">
+              <h2>Spacing</h2>
+              <label>
+                Cell width X px
+                <input id="cellWidth" type="number" min="8" max="220" step="0.5" value="52">
+              </label>
+              <label>
+                Cell height Y px
+                <input id="cellHeight" type="number" min="12" max="260" step="0.5" value="72">
+              </label>
+              <label>
+                Dot pitch
+                <input id="dotPitch" type="number" min="4" max="80" step="0.5" value="22">
+              </label>
+              <label>
+                Cell gap
+                <input id="cellGap" type="number" min="1.4" max="4.5" step="0.1" value="2.4">
+              </label>
+              <label>
+                Row tolerance
+                <input id="rowTolerance" type="range" min="0.25" max="0.75" step="0.05" value="0.45">
+                <span id="rowToleranceValue">0.45</span>
+              </label>
+              <button id="autoSpacing" type="button">Auto Fit</button>
+            </div>
+
+            <div class="control-block stats">
+              <h2>Scan</h2>
+              <p><span id="dotCount">0</span> dots detected</p>
+              <p><span id="reverseDotCount">0</span> reverse-side dots</p>
+              <p><span id="cellCount">0</span> cells translated</p>
+              <p id="statusText">Upload a scan or try the demo.</p>
+            </div>
+          </aside>
+
+          <section class="preview-panel" aria-label="Image preview">
+            <div class="canvas-wrap">
+              <canvas id="scanCanvas" width="1200" height="800"></canvas>
+            </div>
+          </section>
+
+          <section class="result-panel" aria-label="Translation result">
+            <div class="result-heading">
+              <h2>English Text</h2>
+              <button id="copyButton" type="button" title="Copy translated text">Copy</button>
+            </div>
+            <textarea id="outputText" spellcheck="false" placeholder="Translated text will appear here."></textarea>
+            <div class="legend">
+              <span>UEB English Grade 1 Braille</span>
+              <span>No contractions; supports letters, number sign, capitalization, and common punctuation</span>
+            </div>
+          </section>
+        </section>
+      </section>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>

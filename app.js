@@ -1,0 +1,592 @@
+const canvas = document.getElementById("scanCanvas");
+const ctx = canvas.getContext("2d", { willReadFrequently: true });
+const imageInput = document.getElementById("imageInput");
+const outputText = document.getElementById("outputText");
+const statusText = document.getElementById("statusText");
+const dotCount = document.getElementById("dotCount");
+const reverseDotCount = document.getElementById("reverseDotCount");
+const cellCount = document.getElementById("cellCount");
+
+const controls = {
+  polarity: document.getElementById("polarity"),
+  threshold: document.getElementById("threshold"),
+  minArea: document.getElementById("minArea"),
+  maxArea: document.getElementById("maxArea"),
+  cellWidth: document.getElementById("cellWidth"),
+  cellHeight: document.getElementById("cellHeight"),
+  dotPitch: document.getElementById("dotPitch"),
+  cellGap: document.getElementById("cellGap"),
+  rowTolerance: document.getElementById("rowTolerance"),
+  showBoxes: document.getElementById("showBoxes"),
+  doubleSided: document.getElementById("doubleSided")
+};
+
+const readouts = {
+  threshold: document.getElementById("thresholdValue"),
+  minArea: document.getElementById("minAreaValue"),
+  maxArea: document.getElementById("maxAreaValue"),
+  rowTolerance: document.getElementById("rowToleranceValue")
+};
+
+const UEB_GRADE1_SYMBOLS = {
+  1: "a", 3: "b", 9: "c", 25: "d", 17: "e", 11: "f", 27: "g", 19: "h", 10: "i", 26: "j",
+  5: "k", 7: "l", 13: "m", 29: "n", 21: "o", 15: "p", 31: "q", 23: "r", 14: "s", 30: "t",
+  37: "u", 39: "v", 58: "w", 45: "x", 61: "y", 53: "z",
+  2: ",", 6: ";", 18: ":", 50: ".", 38: "?", 22: "!", 36: "-", 4: "'"
+};
+
+const UEB_INDICATORS = {
+  capital: 32,
+  grade1Symbol: 48,
+  number: 60,
+  punctuation: 16,
+  quote: 24
+};
+
+const UEB_GRADE1_NUMBERS = {
+  a: "1", b: "2", c: "3", d: "4", e: "5", f: "6", g: "7", h: "8", i: "9", j: "0"
+};
+
+const UEB_PUNCTUATION_PREFIX_SYMBOLS = {
+  11: "(",
+  28: ")"
+};
+
+const UEB_QUOTE_PREFIX_SYMBOLS = {
+  38: "\"",
+  52: "\""
+};
+
+let sourceImage = null;
+let sourceLabel = "";
+
+function syncReadouts() {
+  readouts.threshold.textContent = controls.threshold.value;
+  readouts.minArea.textContent = `${controls.minArea.value} px`;
+  readouts.maxArea.textContent = `${controls.maxArea.value} px`;
+  readouts.rowTolerance.textContent = controls.rowTolerance.value;
+}
+
+function fitCanvasToImage(img) {
+  const maxWidth = 1600;
+  const ratio = Math.min(1, maxWidth / img.width);
+  canvas.width = Math.max(320, Math.round(img.width * ratio));
+  canvas.height = Math.max(240, Math.round(img.height * ratio));
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+}
+
+function getBinaryMask(imageData, polarity = controls.polarity.value) {
+  const { data, width, height } = imageData;
+  const mask = new Uint8Array(width * height);
+  const threshold = Number(controls.threshold.value);
+  const darkDots = polarity === "dark";
+
+  if (!darkDots) {
+    return getEmbossedMask(imageData);
+  }
+
+  for (let i = 0, p = 0; i < data.length; i += 4, p += 1) {
+    const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+    mask[p] = gray < threshold ? 1 : 0;
+  }
+
+  return mask;
+}
+
+function getEmbossedMask(imageData) {
+  const { data, width, height } = imageData;
+  const gray = new Uint8ClampedArray(width * height);
+  const mask = new Uint8Array(width * height);
+  const threshold = Math.max(5, Number(controls.threshold.value) / 9);
+  const radius = 6;
+  const stride = width + 1;
+  const integral = new Float64Array((width + 1) * (height + 1));
+
+  for (let i = 0, p = 0; i < data.length; i += 4, p += 1) {
+    gray[p] = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+  }
+
+  for (let y = 0; y < height; y += 1) {
+    let rowSum = 0;
+    for (let x = 0; x < width; x += 1) {
+      rowSum += gray[y * width + x];
+      integral[(y + 1) * stride + x + 1] = integral[y * stride + x + 1] + rowSum;
+    }
+  }
+
+  for (let y = radius; y < height - radius; y += 1) {
+    for (let x = radius; x < width - radius; x += 1) {
+      const left = x - radius;
+      const right = x + radius + 1;
+      const top = y - radius;
+      const bottom = y + radius + 1;
+      const area = (right - left) * (bottom - top);
+      const sum = integral[bottom * stride + right] - integral[top * stride + right] - integral[bottom * stride + left] + integral[top * stride + left];
+      const localAverage = sum / area;
+      const index = y * width + x;
+      const contrast = Math.abs(gray[index] - localAverage);
+      const edgeContrast = Math.abs(gray[index - 1] - gray[index + 1]) + Math.abs(gray[index - width] - gray[index + width]);
+      mask[index] = contrast > threshold || edgeContrast > threshold * 2.4 ? 1 : 0;
+    }
+  }
+
+  return dilateMask(erodeMask(dilateMask(mask, width, height, 2), width, height, 1), width, height, 1);
+}
+
+function dilateMask(mask, width, height, iterations) {
+  let current = mask;
+  for (let pass = 0; pass < iterations; pass += 1) {
+    const next = new Uint8Array(current);
+    for (let y = 1; y < height - 1; y += 1) {
+      for (let x = 1; x < width - 1; x += 1) {
+        const index = y * width + x;
+        if (current[index]) continue;
+        next[index] = current[index - 1] || current[index + 1] || current[index - width] || current[index + width] ? 1 : 0;
+      }
+    }
+    current = next;
+  }
+  return current;
+}
+
+function erodeMask(mask, width, height, iterations) {
+  let current = mask;
+  for (let pass = 0; pass < iterations; pass += 1) {
+    const next = new Uint8Array(current);
+    for (let y = 1; y < height - 1; y += 1) {
+      for (let x = 1; x < width - 1; x += 1) {
+        const index = y * width + x;
+        if (!current[index]) continue;
+        next[index] = current[index - 1] && current[index + 1] && current[index - width] && current[index + width] ? 1 : 0;
+      }
+    }
+    current = next;
+  }
+  return current;
+}
+
+function detectComponents(mask, width, height) {
+  const seen = new Uint8Array(mask.length);
+  const dots = [];
+  const minArea = Number(controls.minArea.value);
+  const maxArea = Number(controls.maxArea.value);
+  const queue = [];
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const start = y * width + x;
+      if (!mask[start] || seen[start]) continue;
+
+      let area = 0;
+      let sumX = 0;
+      let sumY = 0;
+      let minX = x;
+      let maxX = x;
+      let minY = y;
+      let maxY = y;
+      queue.length = 0;
+      queue.push(start);
+      seen[start] = 1;
+
+      for (let qi = 0; qi < queue.length; qi += 1) {
+        const idx = queue[qi];
+        const px = idx % width;
+        const py = Math.floor(idx / width);
+        area += 1;
+        sumX += px;
+        sumY += py;
+        if (px < minX) minX = px;
+        if (px > maxX) maxX = px;
+        if (py < minY) minY = py;
+        if (py > maxY) maxY = py;
+
+        const neighbors = [idx - 1, idx + 1, idx - width, idx + width];
+        for (const next of neighbors) {
+          if (next < 0 || next >= mask.length || seen[next] || !mask[next]) continue;
+          const nx = next % width;
+          if (Math.abs(nx - px) > 1) continue;
+          seen[next] = 1;
+          queue.push(next);
+        }
+      }
+
+      const boxW = maxX - minX + 1;
+      const boxH = maxY - minY + 1;
+      const aspect = boxW / Math.max(1, boxH);
+      const fill = area / Math.max(1, boxW * boxH);
+      if (area >= minArea && area <= maxArea && aspect > 0.45 && aspect < 2.2 && fill > 0.18) {
+        dots.push({
+          x: sumX / area,
+          y: sumY / area,
+          minX,
+          minY,
+          maxX,
+          maxY,
+          radius: Math.sqrt(area / Math.PI),
+          area
+        });
+      }
+    }
+  }
+
+  return dots;
+}
+
+function median(values) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+function autoEstimateSpacing(dots) {
+  if (dots.length < 4) return;
+  const nearest = [];
+  for (const dot of dots) {
+    let best = Infinity;
+    for (const other of dots) {
+      if (dot === other) continue;
+      const dx = dot.x - other.x;
+      const dy = dot.y - other.y;
+      const distance = Math.hypot(dx, dy);
+      if (distance > 3 && distance < best) best = distance;
+    }
+    if (Number.isFinite(best)) nearest.push(best);
+  }
+  const pitch = median(nearest);
+  if (pitch) {
+    controls.dotPitch.value = pitch.toFixed(1);
+    controls.cellWidth.value = (pitch * Number(controls.cellGap.value)).toFixed(1);
+    controls.cellHeight.value = (pitch * 3.3).toFixed(1);
+  }
+}
+
+function clusterValues(values, tolerance) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const clusters = [];
+  for (const value of sorted) {
+    const last = clusters[clusters.length - 1];
+    if (!last || Math.abs(last.center - value) > tolerance) {
+      clusters.push({ center: value, values: [value] });
+    } else {
+      last.values.push(value);
+      last.center = last.values.reduce((sum, item) => sum + item, 0) / last.values.length;
+    }
+  }
+  return clusters;
+}
+
+function splitRowsIntoLines(rowCenters, pitch) {
+  const lines = [];
+  let current = [];
+  for (const row of rowCenters) {
+    if (!current.length || row - current[current.length - 1] < pitch * 1.65) {
+      current.push(row);
+    } else {
+      lines.push(current);
+      current = [row];
+    }
+  }
+  if (current.length) lines.push(current);
+  return lines
+    .filter((line) => line.length >= 2)
+    .map((line) => {
+      const rows = [...line];
+      while (rows.length < 3) rows.push(rows[rows.length - 1] + pitch);
+      return rows.slice(0, 3);
+    });
+}
+
+function patternToText(patterns) {
+  let numberMode = false;
+  let capNext = false;
+  let capWord = false;
+  let punctuationPrefix = false;
+  let quotePrefix = false;
+  let text = "";
+
+  for (let index = 0; index < patterns.length; index += 1) {
+    const pattern = patterns[index];
+    if (pattern === 0) {
+      text += " ";
+      numberMode = false;
+      capNext = false;
+      capWord = false;
+      punctuationPrefix = false;
+      quotePrefix = false;
+      continue;
+    }
+
+    if (pattern === UEB_INDICATORS.number) {
+      numberMode = true;
+      continue;
+    }
+    if (pattern === UEB_INDICATORS.capital) {
+      if (patterns[index + 1] === UEB_INDICATORS.capital) {
+        capWord = true;
+        capNext = false;
+        index += 1;
+      } else {
+        capNext = true;
+      }
+      continue;
+    }
+    if (pattern === UEB_INDICATORS.grade1Symbol) {
+      numberMode = false;
+      continue;
+    }
+    if (pattern === UEB_INDICATORS.punctuation) {
+      punctuationPrefix = true;
+      continue;
+    }
+    if (pattern === UEB_INDICATORS.quote) {
+      quotePrefix = true;
+      continue;
+    }
+
+    if (punctuationPrefix) {
+      text += UEB_PUNCTUATION_PREFIX_SYMBOLS[pattern] || "?";
+      punctuationPrefix = false;
+      numberMode = false;
+      capNext = false;
+      capWord = false;
+      continue;
+    }
+
+    if (quotePrefix) {
+      text += UEB_QUOTE_PREFIX_SYMBOLS[pattern] || "?";
+      quotePrefix = false;
+      numberMode = false;
+      capNext = false;
+      capWord = false;
+      continue;
+    }
+
+    let char = UEB_GRADE1_SYMBOLS[pattern] || "?";
+    if (numberMode && UEB_GRADE1_NUMBERS[char]) {
+      char = UEB_GRADE1_NUMBERS[char];
+    } else if (!/[,;:.?!'"-]/.test(char)) {
+      numberMode = false;
+    }
+    if ((capNext || capWord) && /[a-z]/.test(char)) {
+      char = char.toUpperCase();
+      capNext = false;
+    } else if (!/[a-z]/.test(char) && !/['-]/.test(char)) {
+      capWord = false;
+    }
+    text += char;
+  }
+
+  return text.replace(/ +([,;:.?!])/g, "$1");
+}
+
+function mirrorDots(dots, width) {
+  return dots.map((dot) => ({
+    ...dot,
+    x: width - dot.x,
+    minX: width - dot.maxX,
+    maxX: width - dot.minX
+  }));
+}
+
+function mirrorCells(cells, width) {
+  return cells.map((cell) => ({
+    ...cell,
+    box: {
+      ...cell.box,
+      x: width - cell.box.x - cell.box.width
+    }
+  }));
+}
+
+function translateDots(dots) {
+  const pitch = Number(controls.dotPitch.value);
+  const tolerance = pitch * Number(controls.rowTolerance.value);
+  const rowClusters = clusterValues(dots.map((dot) => dot.y), tolerance);
+  const lines = splitRowsIntoLines(rowClusters.map((row) => row.center), pitch);
+  const cellWidth = Number(controls.cellWidth.value) || pitch * Number(controls.cellGap.value);
+  const cellHeight = Number(controls.cellHeight.value) || pitch * 3.3;
+  const cellAdvance = cellWidth;
+  const pageLines = [];
+  let cellsSeen = 0;
+  const cells = [];
+
+  for (const rows of lines) {
+    const top = rows[0] - cellHeight * 0.22;
+    const bottom = top + cellHeight;
+    const lineDots = dots.filter((dot) => dot.y >= top && dot.y <= bottom).sort((a, b) => a.x - b.x);
+    if (!lineDots.length) continue;
+    const startX = Math.min(...lineDots.map((dot) => dot.x)) - cellWidth * 0.18;
+    const endX = Math.max(...lineDots.map((dot) => dot.x)) + cellWidth * 0.5;
+    const estimatedCells = Math.max(1, Math.round((endX - startX) / cellAdvance) + 1);
+    const patterns = new Array(estimatedCells).fill(0);
+    const lineCells = Array.from({ length: estimatedCells }, (_, index) => ({
+      pattern: 0,
+      box: {
+        x: startX + index * cellAdvance,
+        y: top,
+        width: cellWidth,
+        height: cellHeight
+      }
+    }));
+
+    for (const dot of lineDots) {
+      const cellIndex = Math.max(0, Math.min(estimatedCells - 1, Math.floor((dot.x - startX) / cellAdvance)));
+      const box = lineCells[cellIndex].box;
+      const localX = dot.x - box.x;
+      const localY = dot.y - box.y;
+      const col = localX > cellWidth * 0.5 ? 1 : 0;
+      const row = Math.max(0, Math.min(2, Math.floor((localY / cellHeight) * 3)));
+      const dotNumber = col === 0 ? row + 1 : row + 4;
+      patterns[cellIndex] |= 1 << (dotNumber - 1);
+      lineCells[cellIndex].pattern = patterns[cellIndex];
+    }
+
+    while (patterns.length && patterns[patterns.length - 1] === 0) patterns.pop();
+    const visibleCells = lineCells.slice(0, patterns.length);
+    cellsSeen += patterns.length;
+    cells.push(...visibleCells);
+    pageLines.push(patternToText(patterns));
+  }
+
+  return {
+    text: pageLines.join("\n"),
+    cellsSeen,
+    cells
+  };
+}
+
+function drawCellOverlay(cells, color = "#0f766e", fill = "rgba(15, 118, 110, 0.08)") {
+  if (!controls.showBoxes.checked) return;
+  ctx.save();
+  ctx.lineWidth = Math.max(2, canvas.width / 700);
+  ctx.strokeStyle = color;
+  ctx.fillStyle = fill;
+  for (const cell of cells) {
+    const { x, y, width, height } = cell.box;
+    ctx.fillRect(x, y, width, height);
+    ctx.strokeRect(x, y, width, height);
+  }
+  ctx.restore();
+}
+
+function processImage({ autoFit = false } = {}) {
+  if (!sourceImage) return;
+  fitCanvasToImage(sourceImage);
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const mask = getBinaryMask(imageData);
+  const dots = detectComponents(mask, canvas.width, canvas.height);
+  if (autoFit) autoEstimateSpacing(dots);
+  const primary = translateDots(dots);
+  let output = primary.text;
+  let reverseDots = [];
+  let totalCells = primary.cellsSeen;
+
+  if (controls.doubleSided.checked) {
+    const reversePolarity = controls.polarity.value === "dark" ? "light" : "dark";
+    reverseDots = detectComponents(getBinaryMask(imageData, reversePolarity), canvas.width, canvas.height);
+    const reverse = translateDots(mirrorDots(reverseDots, canvas.width));
+    totalCells += reverse.cellsSeen;
+    output = [
+      "Side A",
+      primary.text || "(no readable Braille detected)",
+      "",
+      "Side B",
+      reverse.text || "(no readable reverse-side Braille detected)"
+    ].join("\n");
+    reverse.cells = mirrorCells(reverse.cells, canvas.width);
+    drawCellOverlay(reverse.cells, "#b45309", "rgba(180, 83, 9, 0.08)");
+  }
+
+  drawCellOverlay(primary.cells, "#0f766e", "rgba(15, 118, 110, 0.08)");
+  outputText.value = output;
+  dotCount.textContent = String(dots.length);
+  reverseDotCount.textContent = String(reverseDots.length);
+  cellCount.textContent = String(totalCells);
+  statusText.textContent = dots.length ? `${sourceLabel} processed.` : "No dots found. Adjust threshold or dot color.";
+}
+
+function loadImageFromFile(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      sourceImage = img;
+      sourceLabel = file.name;
+      controls.polarity.value = "light";
+      controls.threshold.value = "90";
+      controls.minArea.value = "8";
+      controls.maxArea.value = "900";
+      controls.cellWidth.value = "52";
+      controls.cellHeight.value = "72";
+      syncReadouts();
+      processImage({ autoFit: true });
+    };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function makeDemoImage() {
+  const img = new Image();
+  img.onload = () => {
+    sourceImage = img;
+    sourceLabel = "demo-braille.jpg";
+    controls.polarity.value = "light";
+    controls.doubleSided.checked = false;
+    controls.showBoxes.checked = true;
+    controls.threshold.value = "90";
+    controls.minArea.value = "8";
+    controls.maxArea.value = "900";
+    controls.cellWidth.value = "52";
+    controls.cellHeight.value = "72";
+    controls.dotPitch.value = "22";
+    controls.cellGap.value = "2.4";
+    syncReadouts();
+    processImage({ autoFit: true });
+  };
+  img.onerror = () => {
+    statusText.textContent = "Demo image could not be loaded.";
+  };
+  img.src = "demo-braille.jpg";
+}
+
+function drawEmptyState() {
+  canvas.width = 1200;
+  canvas.height = 800;
+  ctx.fillStyle = "#fbfaf5";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "#5c6862";
+  ctx.font = "36px system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("Upload a white Braille print scan", canvas.width / 2, canvas.height / 2 - 12);
+  ctx.font = "22px system-ui, sans-serif";
+  ctx.fillText("Detection boxes will appear here after processing", canvas.width / 2, canvas.height / 2 + 32);
+}
+
+imageInput.addEventListener("change", (event) => {
+  const [file] = event.target.files;
+  if (file) loadImageFromFile(file);
+});
+
+document.getElementById("demoButton").addEventListener("click", makeDemoImage);
+document.getElementById("autoSpacing").addEventListener("click", () => processImage({ autoFit: true }));
+document.getElementById("copyButton").addEventListener("click", async () => {
+  await navigator.clipboard.writeText(outputText.value);
+  statusText.textContent = "Translation copied.";
+});
+
+Object.values(controls).forEach((control) => {
+  control.addEventListener("input", () => {
+    syncReadouts();
+    processImage();
+  });
+  control.addEventListener("change", () => {
+    syncReadouts();
+    processImage();
+  });
+});
+
+syncReadouts();
+drawEmptyState();
