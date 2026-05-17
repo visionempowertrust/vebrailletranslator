@@ -532,16 +532,16 @@ function makeDemoImage() {
   const img = new Image();
   img.onload = () => {
     sourceImage = img;
-    sourceLabel = "demo-braille.jpg";
-    controls.polarity.value = "light";
+    sourceLabel = "demo-braille.png";
+    controls.polarity.value = "dark";
     controls.doubleSided.checked = false;
     controls.showBoxes.checked = true;
-    controls.threshold.value = "90";
+    controls.threshold.value = "120";
     controls.minArea.value = "8";
     controls.maxArea.value = "900";
-    controls.cellWidth.value = "52";
-    controls.cellHeight.value = "72";
-    controls.dotPitch.value = "22";
+    controls.cellWidth.value = "28";
+    controls.cellHeight.value = "34";
+    controls.dotPitch.value = "10";
     controls.cellGap.value = "2.4";
     syncReadouts();
     processImage({ autoFit: true });
@@ -549,7 +549,7 @@ function makeDemoImage() {
   img.onerror = () => {
     statusText.textContent = "Demo image could not be loaded.";
   };
-  img.src = "demo-braille.jpg";
+  img.src = "demo-braille.png";
 }
 
 function drawEmptyState() {
