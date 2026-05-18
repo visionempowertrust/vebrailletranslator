@@ -3,6 +3,7 @@ const ctx = canvas.getContext("2d", { willReadFrequently: true });
 const imageInput = document.getElementById("imageInput");
 const outputText = document.getElementById("outputText");
 const statusText = document.getElementById("statusText");
+const engineStatus = document.getElementById("engineStatus");
 const dotCount = document.getElementById("dotCount");
 const reverseDotCount = document.getElementById("reverseDotCount");
 const cellCount = document.getElementById("cellCount");
@@ -59,6 +60,36 @@ const UEB_QUOTE_PREFIX_SYMBOLS = {
 
 let sourceImage = null;
 let sourceLabel = "";
+let processRunId = 0;
+let processTimer = 0;
+
+function setEngineStatus(state, message) {
+  engineStatus.dataset.state = state;
+  engineStatus.textContent = message;
+}
+
+async function initializeTranslationEngine() {
+  if (!window.liblouisEngine) {
+    setEngineStatus("error", "Translation engine: local fallback");
+    return;
+  }
+
+  try {
+    setEngineStatus("loading", "Translation engine: Liblouis loading...");
+    await window.liblouisEngine.init();
+    setEngineStatus("ready", `Translation engine: Liblouis ${window.liblouisEngine.version}`);
+  } catch (error) {
+    setEngineStatus("error", "Translation engine: local fallback");
+    console.warn("Liblouis initialization failed; local fallback table is active.", error);
+  }
+}
+
+function scheduleProcess(options = {}) {
+  window.clearTimeout(processTimer);
+  processTimer = window.setTimeout(() => {
+    processImage(options);
+  }, 80);
+}
 
 function syncReadouts() {
   readouts.threshold.textContent = controls.threshold.value;
@@ -298,7 +329,7 @@ function splitRowsIntoLines(rowCenters, pitch) {
     });
 }
 
-function patternToText(patterns) {
+function patternToTextFallback(patterns) {
   let numberMode = false;
   let capNext = false;
   let capWord = false;
@@ -381,6 +412,19 @@ function patternToText(patterns) {
   return text.replace(/ +([,;:.?!])/g, "$1");
 }
 
+async function patternToText(patterns) {
+  if (window.liblouisEngine) {
+    try {
+      return await window.liblouisEngine.backTranslatePatterns(patterns);
+    } catch (error) {
+      setEngineStatus("error", "Translation engine: local fallback");
+      console.warn("Liblouis back-translation failed; using local fallback table.", error);
+    }
+  }
+
+  return patternToTextFallback(patterns);
+}
+
 function mirrorDots(dots, width) {
   return dots.map((dot) => ({
     ...dot,
@@ -400,7 +444,7 @@ function mirrorCells(cells, width) {
   }));
 }
 
-function translateDots(dots) {
+async function translateDots(dots) {
   const pitch = Number(controls.dotPitch.value);
   const tolerance = pitch * Number(controls.rowTolerance.value);
   const rowClusters = clusterValues(dots.map((dot) => dot.y), tolerance);
@@ -447,7 +491,7 @@ function translateDots(dots) {
     const visibleCells = lineCells.slice(0, patterns.length);
     cellsSeen += patterns.length;
     cells.push(...visibleCells);
-    pageLines.push(patternToText(patterns));
+    pageLines.push(await patternToText(patterns));
   }
 
   return {
@@ -471,14 +515,17 @@ function drawCellOverlay(cells, color = "#0f766e", fill = "rgba(15, 118, 110, 0.
   ctx.restore();
 }
 
-function processImage({ autoFit = false } = {}) {
+async function processImage({ autoFit = false } = {}) {
   if (!sourceImage) return;
+  const runId = ++processRunId;
+  statusText.textContent = `${sourceLabel} processing...`;
   fitCanvasToImage(sourceImage);
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const mask = getBinaryMask(imageData);
   const dots = detectComponents(mask, canvas.width, canvas.height);
   if (autoFit) autoEstimateSpacing(dots);
-  const primary = translateDots(dots);
+  const primary = await translateDots(dots);
+  if (runId !== processRunId) return;
   let output = primary.text;
   let reverseDots = [];
   let totalCells = primary.cellsSeen;
@@ -486,7 +533,8 @@ function processImage({ autoFit = false } = {}) {
   if (controls.doubleSided.checked) {
     const reversePolarity = controls.polarity.value === "dark" ? "light" : "dark";
     reverseDots = detectComponents(getBinaryMask(imageData, reversePolarity), canvas.width, canvas.height);
-    const reverse = translateDots(mirrorDots(reverseDots, canvas.width));
+    const reverse = await translateDots(mirrorDots(reverseDots, canvas.width));
+    if (runId !== processRunId) return;
     totalCells += reverse.cellsSeen;
     output = [
       "Side A",
@@ -504,7 +552,10 @@ function processImage({ autoFit = false } = {}) {
   dotCount.textContent = String(dots.length);
   reverseDotCount.textContent = String(reverseDots.length);
   cellCount.textContent = String(totalCells);
-  statusText.textContent = dots.length ? `${sourceLabel} processed.` : "No dots found. Adjust threshold or dot color.";
+  const engineText = window.liblouisEngine && window.liblouisEngine.ready
+    ? ` Liblouis ${window.liblouisEngine.version}.`
+    : " Local fallback table.";
+  statusText.textContent = dots.length ? `${sourceLabel} processed.${engineText}` : "No dots found. Adjust threshold or dot color.";
 }
 
 function loadImageFromFile(file) {
@@ -521,9 +572,15 @@ function loadImageFromFile(file) {
       controls.cellWidth.value = "52";
       controls.cellHeight.value = "72";
       syncReadouts();
-      processImage({ autoFit: true });
+      scheduleProcess({ autoFit: true });
+    };
+    img.onerror = () => {
+      statusText.textContent = "The selected image could not be loaded.";
     };
     img.src = reader.result;
+  };
+  reader.onerror = () => {
+    statusText.textContent = "The selected file could not be read.";
   };
   reader.readAsDataURL(file);
 }
@@ -544,7 +601,7 @@ function makeDemoImage() {
     controls.dotPitch.value = "10";
     controls.cellGap.value = "2.4";
     syncReadouts();
-    processImage({ autoFit: true });
+    scheduleProcess({ autoFit: true });
   };
   img.onerror = () => {
     statusText.textContent = "Demo image could not be loaded.";
@@ -571,7 +628,7 @@ imageInput.addEventListener("change", (event) => {
 });
 
 document.getElementById("demoButton").addEventListener("click", makeDemoImage);
-document.getElementById("autoSpacing").addEventListener("click", () => processImage({ autoFit: true }));
+document.getElementById("autoSpacing").addEventListener("click", () => scheduleProcess({ autoFit: true }));
 document.getElementById("copyButton").addEventListener("click", async () => {
   await navigator.clipboard.writeText(outputText.value);
   statusText.textContent = "Translation copied.";
@@ -580,13 +637,14 @@ document.getElementById("copyButton").addEventListener("click", async () => {
 Object.values(controls).forEach((control) => {
   control.addEventListener("input", () => {
     syncReadouts();
-    processImage();
+    scheduleProcess();
   });
   control.addEventListener("change", () => {
     syncReadouts();
-    processImage();
+    scheduleProcess();
   });
 });
 
 syncReadouts();
 drawEmptyState();
+initializeTranslationEngine();

@@ -8,14 +8,21 @@ const host = "127.0.0.1";
 const types = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8"
+  ".js": "text/javascript; charset=utf-8",
+  ".ctb": "text/plain; charset=utf-8",
+  ".cti": "text/plain; charset=utf-8",
+  ".dis": "text/plain; charset=utf-8",
+  ".uti": "text/plain; charset=utf-8",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png"
 };
 
 const server = http.createServer((request, response) => {
   const requestPath = request.url === "/" ? "/index.html" : decodeURIComponent(request.url.split("?")[0]);
-  const filePath = path.join(root, requestPath);
+  const filePath = path.resolve(root, `.${requestPath}`);
 
-  if (!filePath.startsWith(root)) {
+  if (filePath !== root && !filePath.startsWith(`${root}${path.sep}`)) {
     response.writeHead(403);
     response.end("Forbidden");
     return;
@@ -28,7 +35,10 @@ const server = http.createServer((request, response) => {
       return;
     }
 
-    response.writeHead(200, { "Content-Type": types[path.extname(filePath)] || "application/octet-stream" });
+    response.writeHead(200, {
+      "Cache-Control": "no-cache",
+      "Content-Type": types[path.extname(filePath).toLowerCase()] || "application/octet-stream"
+    });
     response.end(data);
   });
 });

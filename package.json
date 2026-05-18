@@ -1,0 +1,10 @@
+{
+  "name": "vebrailletranslator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Printed Braille scan translator using Liblouis for UEB English Grade 1 back-translation.",
+  "scripts": {
+    "start": "node dev-server.js",
+    "check": "node --check app.js && node --check liblouis-engine.js && node --check dev-server.js"
+  }
+}

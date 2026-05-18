@@ -192,6 +192,15 @@ textarea {
   color: var(--warn);
 }
 
+.engine-status {
+  color: var(--accent-strong);
+  font-weight: 750;
+}
+
+.engine-status[data-state="error"] {
+  color: var(--warn);
+}
+
 .preview-panel {
   min-width: 0;
   display: grid;
