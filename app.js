@@ -14,22 +14,21 @@ const controls = {
   translationTable: document.getElementById("translationTable"),
   polarity: document.getElementById("polarity"),
   threshold: document.getElementById("threshold"),
-  minArea: document.getElementById("minArea"),
-  maxArea: document.getElementById("maxArea"),
-  cellWidth: document.getElementById("cellWidth"),
-  cellHeight: document.getElementById("cellHeight"),
-  dotPitch: document.getElementById("dotPitch"),
-  cellGap: document.getElementById("cellGap"),
-  rowTolerance: document.getElementById("rowTolerance"),
+  gridStandard: document.getElementById("gridStandard"),
+  imageZoom: document.getElementById("imageZoom"),
+  imageOffsetX: document.getElementById("imageOffsetX"),
+  imageOffsetY: document.getElementById("imageOffsetY"),
+  gridScale: document.getElementById("gridScale"),
   showBoxes: document.getElementById("showBoxes"),
   doubleSided: document.getElementById("doubleSided")
 };
 
 const readouts = {
   threshold: document.getElementById("thresholdValue"),
-  minArea: document.getElementById("minAreaValue"),
-  maxArea: document.getElementById("maxAreaValue"),
-  rowTolerance: document.getElementById("rowToleranceValue")
+  imageZoom: document.getElementById("imageZoomValue"),
+  imageOffsetX: document.getElementById("imageOffsetXValue"),
+  imageOffsetY: document.getElementById("imageOffsetYValue"),
+  gridScale: document.getElementById("gridScaleValue")
 };
 
 const UEB_GRADE1_SYMBOLS = {
@@ -60,6 +59,25 @@ const UEB_QUOTE_PREFIX_SYMBOLS = {
   38: "\"",
   52: "\""
 };
+
+const BRAILLE_GRID_STANDARDS = {
+  paper: {
+    name: "BANA/NLS paper braille",
+    dotPitchMm: 2.34,
+    cellPitchMm: 6.2,
+    linePitchMm: 10,
+    dotDiameterMm: 1.44
+  },
+  signage: {
+    name: "ANSI/ADA signage braille",
+    dotPitchMm: 2.4,
+    cellPitchMm: 6.85,
+    linePitchMm: 10.1,
+    dotDiameterMm: 1.55
+  }
+};
+
+const CSS_PX_PER_MM = 96 / 25.4;
 
 const TRANSLATION_TABLES = [
   {
@@ -212,9 +230,10 @@ function scheduleProcess(options = {}) {
 
 function syncReadouts() {
   readouts.threshold.textContent = controls.threshold.value;
-  readouts.minArea.textContent = `${controls.minArea.value} px`;
-  readouts.maxArea.textContent = `${controls.maxArea.value} px`;
-  readouts.rowTolerance.textContent = controls.rowTolerance.value;
+  readouts.imageZoom.textContent = `${controls.imageZoom.value}%`;
+  readouts.imageOffsetX.textContent = `${controls.imageOffsetX.value} px`;
+  readouts.imageOffsetY.textContent = `${controls.imageOffsetY.value} px`;
+  readouts.gridScale.textContent = `${controls.gridScale.value}%`;
   if (controls.translationTable.options.length) {
     const selectedTable = getSelectedTranslationTable();
     selectedTableName.textContent = selectedTable.label;
@@ -224,11 +243,30 @@ function syncReadouts() {
 
 function fitCanvasToImage(img) {
   const maxWidth = 1600;
-  const ratio = Math.min(1, maxWidth / img.width);
-  canvas.width = Math.max(320, Math.round(img.width * ratio));
-  canvas.height = Math.max(240, Math.round(img.height * ratio));
+  const baseRatio = Math.min(1, maxWidth / img.width);
+  const zoom = Number(controls.imageZoom.value) / 100;
+  const width = Math.max(320, Math.round(img.width * baseRatio * zoom));
+  const height = Math.max(240, Math.round(img.height * baseRatio * zoom));
+  const offsetX = Number(controls.imageOffsetX.value);
+  const offsetY = Number(controls.imageOffsetY.value);
+  canvas.width = Math.max(320, width + Math.abs(offsetX) * 2);
+  canvas.height = Math.max(240, height + Math.abs(offsetY) * 2);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "#fbfaf5";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img, offsetX, offsetY, width, height);
+}
+
+function getGridMetrics() {
+  const standard = BRAILLE_GRID_STANDARDS[controls.gridStandard.value] || BRAILLE_GRID_STANDARDS.paper;
+  const scale = Number(controls.gridScale.value) / 100;
+  return {
+    standard,
+    dotPitch: standard.dotPitchMm * CSS_PX_PER_MM * scale,
+    cellPitch: standard.cellPitchMm * CSS_PX_PER_MM * scale,
+    linePitch: standard.linePitchMm * CSS_PX_PER_MM * scale,
+    dotRadius: standard.dotDiameterMm * CSS_PX_PER_MM * scale * 0.5
+  };
 }
 
 function getBinaryMask(imageData, polarity = controls.polarity.value) {
@@ -324,8 +362,10 @@ function erodeMask(mask, width, height, iterations) {
 function detectComponents(mask, width, height) {
   const seen = new Uint8Array(mask.length);
   const dots = [];
-  const minArea = Number(controls.minArea.value);
-  const maxArea = Number(controls.maxArea.value);
+  const { dotRadius } = getGridMetrics();
+  const expectedDotArea = Math.PI * dotRadius * dotRadius;
+  const minArea = Math.max(2, expectedDotArea * 0.12);
+  const maxArea = Math.max(20, expectedDotArea * 4.5);
   const queue = [];
 
   for (let y = 0; y < height; y += 1) {
@@ -395,7 +435,7 @@ function median(values) {
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-function autoEstimateSpacing(dots) {
+function autoFitGridToDots(dots) {
   if (dots.length < 4) return;
   const nearest = [];
   for (const dot of dots) {
@@ -411,9 +451,10 @@ function autoEstimateSpacing(dots) {
   }
   const pitch = median(nearest);
   if (pitch) {
-    controls.dotPitch.value = pitch.toFixed(1);
-    controls.cellWidth.value = (pitch * Number(controls.cellGap.value)).toFixed(1);
-    controls.cellHeight.value = (pitch * 3.3).toFixed(1);
+    const targetPitch = getGridMetrics().dotPitch;
+    const currentZoom = Number(controls.imageZoom.value);
+    const nextZoom = Math.max(40, Math.min(400, currentZoom * (targetPitch / pitch)));
+    controls.imageZoom.value = nextZoom.toFixed(0);
   }
 }
 
@@ -573,60 +614,70 @@ function mirrorCells(cells, width) {
   }));
 }
 
+function getGridOrigin(dots, metrics) {
+  if (!dots.length) return { x: metrics.dotPitch, y: metrics.dotPitch };
+  return {
+    x: Math.min(...dots.map((dot) => dot.x)),
+    y: Math.min(...dots.map((dot) => dot.y))
+  };
+}
+
 async function translateDots(dots) {
-  const pitch = Number(controls.dotPitch.value);
-  const tolerance = pitch * Number(controls.rowTolerance.value);
-  const rowClusters = clusterValues(dots.map((dot) => dot.y), tolerance);
-  const lines = splitRowsIntoLines(rowClusters.map((row) => row.center), pitch);
-  const cellWidth = Number(controls.cellWidth.value) || pitch * Number(controls.cellGap.value);
-  const cellHeight = Number(controls.cellHeight.value) || pitch * 3.3;
-  const cellAdvance = cellWidth;
-  const pageLines = [];
-  let cellsSeen = 0;
+  const metrics = getGridMetrics();
+  const origin = getGridOrigin(dots, metrics);
+  const tolerance = metrics.dotPitch * 0.48;
+  const lineMap = new Map();
   const cells = [];
 
-  for (const rows of lines) {
-    const top = rows[0] - cellHeight * 0.22;
-    const bottom = top + cellHeight;
-    const lineDots = dots.filter((dot) => dot.y >= top && dot.y <= bottom).sort((a, b) => a.x - b.x);
-    if (!lineDots.length) continue;
-    const startX = Math.min(...lineDots.map((dot) => dot.x)) - cellWidth * 0.18;
-    const endX = Math.max(...lineDots.map((dot) => dot.x)) + cellWidth * 0.5;
-    const estimatedCells = Math.max(1, Math.round((endX - startX) / cellAdvance) + 1);
-    const patterns = new Array(estimatedCells).fill(0);
-    const lineCells = Array.from({ length: estimatedCells }, (_, index) => ({
-      pattern: 0,
-      box: {
-        x: startX + index * cellAdvance,
-        y: top,
-        width: cellWidth,
-        height: cellHeight
-      }
-    }));
+  for (const dot of dots) {
+    const lineIndex = Math.round((dot.y - origin.y) / metrics.linePitch);
+    const lineY = origin.y + lineIndex * metrics.linePitch;
+    const row = Math.round((dot.y - lineY) / metrics.dotPitch);
+    if (row < 0 || row > 2 || Math.abs(dot.y - (lineY + row * metrics.dotPitch)) > tolerance) continue;
 
-    for (const dot of lineDots) {
-      const cellIndex = Math.max(0, Math.min(estimatedCells - 1, Math.floor((dot.x - startX) / cellAdvance)));
-      const box = lineCells[cellIndex].box;
-      const localX = dot.x - box.x;
-      const localY = dot.y - box.y;
-      const col = localX > cellWidth * 0.5 ? 1 : 0;
-      const row = Math.max(0, Math.min(2, Math.floor((localY / cellHeight) * 3)));
-      const dotNumber = col === 0 ? row + 1 : row + 4;
-      patterns[cellIndex] |= 1 << (dotNumber - 1);
-      lineCells[cellIndex].pattern = patterns[cellIndex];
+    const cellIndex = Math.max(0, Math.floor((dot.x - origin.x + metrics.cellPitch * 0.2) / metrics.cellPitch));
+    const cellX = origin.x + cellIndex * metrics.cellPitch;
+    const col = Math.abs(dot.x - (cellX + metrics.dotPitch)) < Math.abs(dot.x - cellX) ? 1 : 0;
+    if (Math.abs(dot.x - (cellX + col * metrics.dotPitch)) > tolerance) continue;
+
+    if (!lineMap.has(lineIndex)) lineMap.set(lineIndex, new Map());
+    const rowMap = lineMap.get(lineIndex);
+    rowMap.set(cellIndex, (rowMap.get(cellIndex) || 0) | (1 << (col * 3 + row)));
+  }
+
+  const pageLines = [];
+  let cellsSeen = 0;
+  const sortedLines = [...lineMap.entries()].sort((a, b) => a[0] - b[0]);
+
+  for (const [lineIndex, rowMap] of sortedLines) {
+    const maxCell = Math.max(...rowMap.keys());
+    const patterns = [];
+    for (let cellIndex = 0; cellIndex <= maxCell; cellIndex += 1) {
+      const pattern = rowMap.get(cellIndex) || 0;
+      patterns.push(pattern);
+      if (pattern) {
+        cells.push({
+          pattern,
+          box: {
+            x: origin.x + cellIndex * metrics.cellPitch - metrics.dotPitch * 0.55,
+            y: origin.y + lineIndex * metrics.linePitch - metrics.dotPitch * 0.65,
+            width: metrics.dotPitch * 2.1,
+            height: metrics.dotPitch * 3.3
+          }
+        });
+      }
     }
 
-    while (patterns.length && patterns[patterns.length - 1] === 0) patterns.pop();
-    const visibleCells = lineCells.slice(0, patterns.length);
     cellsSeen += patterns.length;
-    cells.push(...visibleCells);
     pageLines.push(await patternToText(patterns));
   }
 
   return {
     text: pageLines.join("\n"),
     cellsSeen,
-    cells
+    cells,
+    origin,
+    metrics
   };
 }
 
@@ -644,6 +695,42 @@ function drawCellOverlay(cells, color = "#0f766e", fill = "rgba(15, 118, 110, 0.
   ctx.restore();
 }
 
+function drawStandardGrid(dots, color = "rgba(23, 32, 27, 0.26)") {
+  if (!controls.showBoxes.checked) return;
+  const metrics = getGridMetrics();
+  const origin = getGridOrigin(dots, metrics);
+  const maxLines = Math.ceil((canvas.height - origin.y) / metrics.linePitch) + 1;
+  const maxCells = Math.ceil((canvas.width - origin.x) / metrics.cellPitch) + 1;
+
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.fillStyle = "rgba(15, 118, 110, 0.18)";
+  ctx.lineWidth = 1;
+
+  for (let line = 0; line < maxLines; line += 1) {
+    const y = origin.y + line * metrics.linePitch;
+    if (y < -metrics.linePitch || y > canvas.height + metrics.linePitch) continue;
+    for (let cell = 0; cell < maxCells; cell += 1) {
+      const x = origin.x + cell * metrics.cellPitch;
+      if (x < -metrics.cellPitch || x > canvas.width + metrics.cellPitch) continue;
+      ctx.strokeRect(
+        x - metrics.dotPitch * 0.55,
+        y - metrics.dotPitch * 0.65,
+        metrics.dotPitch * 2.1,
+        metrics.dotPitch * 3.3
+      );
+      for (let row = 0; row < 3; row += 1) {
+        for (let col = 0; col < 2; col += 1) {
+          ctx.beginPath();
+          ctx.arc(x + col * metrics.dotPitch, y + row * metrics.dotPitch, Math.max(1.5, metrics.dotRadius * 0.45), 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+  }
+  ctx.restore();
+}
+
 async function processImage({ autoFit = false } = {}) {
   if (!sourceImage) return;
   const runId = ++processRunId;
@@ -651,8 +738,17 @@ async function processImage({ autoFit = false } = {}) {
   fitCanvasToImage(sourceImage);
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const mask = getBinaryMask(imageData);
-  const dots = detectComponents(mask, canvas.width, canvas.height);
-  if (autoFit) autoEstimateSpacing(dots);
+  let dots = detectComponents(mask, canvas.width, canvas.height);
+  if (autoFit) {
+    const beforeZoom = controls.imageZoom.value;
+    autoFitGridToDots(dots);
+    syncReadouts();
+    if (controls.imageZoom.value !== beforeZoom) {
+      fitCanvasToImage(sourceImage);
+      const fittedImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      dots = detectComponents(getBinaryMask(fittedImageData), canvas.width, canvas.height);
+    }
+  }
   const primary = await translateDots(dots);
   if (runId !== processRunId) return;
   let output = primary.text;
@@ -676,6 +772,7 @@ async function processImage({ autoFit = false } = {}) {
     drawCellOverlay(reverse.cells, "#b45309", "rgba(180, 83, 9, 0.08)");
   }
 
+  drawStandardGrid(dots);
   drawCellOverlay(primary.cells, "#0f766e", "rgba(15, 118, 110, 0.08)");
   outputText.value = output;
   dotCount.textContent = String(dots.length);
@@ -696,10 +793,11 @@ function loadImageFromFile(file) {
       sourceLabel = file.name;
       controls.polarity.value = "light";
       controls.threshold.value = "90";
-      controls.minArea.value = "8";
-      controls.maxArea.value = "900";
-      controls.cellWidth.value = "52";
-      controls.cellHeight.value = "72";
+      controls.gridStandard.value = "paper";
+      controls.imageZoom.value = "100";
+      controls.imageOffsetX.value = "0";
+      controls.imageOffsetY.value = "0";
+      controls.gridScale.value = "100";
       syncReadouts();
       scheduleProcess({ autoFit: true });
     };
@@ -723,12 +821,11 @@ function makeDemoImage() {
     controls.doubleSided.checked = false;
     controls.showBoxes.checked = true;
     controls.threshold.value = "120";
-    controls.minArea.value = "8";
-    controls.maxArea.value = "900";
-    controls.cellWidth.value = "28";
-    controls.cellHeight.value = "34";
-    controls.dotPitch.value = "10";
-    controls.cellGap.value = "2.4";
+    controls.gridStandard.value = "paper";
+    controls.imageZoom.value = "100";
+    controls.imageOffsetX.value = "0";
+    controls.imageOffsetY.value = "0";
+    controls.gridScale.value = "100";
     syncReadouts();
     scheduleProcess({ autoFit: true });
   };
@@ -757,7 +854,7 @@ imageInput.addEventListener("change", (event) => {
 });
 
 document.getElementById("demoButton").addEventListener("click", makeDemoImage);
-document.getElementById("autoSpacing").addEventListener("click", () => scheduleProcess({ autoFit: true }));
+document.getElementById("autoFitGrid").addEventListener("click", () => scheduleProcess({ autoFit: true }));
 document.getElementById("copyButton").addEventListener("click", async () => {
   await navigator.clipboard.writeText(outputText.value);
   statusText.textContent = "Translation copied.";

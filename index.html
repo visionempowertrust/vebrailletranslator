@@ -51,42 +51,38 @@
                 <input id="threshold" type="range" min="20" max="235" value="90">
                 <span id="thresholdValue">90</span>
               </label>
-              <label>
-                Minimum dot size
-                <input id="minArea" type="range" min="4" max="250" value="8">
-                <span id="minAreaValue">8 px</span>
-              </label>
-              <label>
-                Maximum dot size
-                <input id="maxArea" type="range" min="20" max="1400" value="900">
-                <span id="maxAreaValue">900 px</span>
-              </label>
             </div>
 
             <div class="control-block">
-              <h2>Spacing</h2>
+              <h2>Standards Grid</h2>
               <label>
-                Cell width X px
-                <input id="cellWidth" type="number" min="8" max="220" step="0.5" value="52">
+                Braille standard
+                <select id="gridStandard">
+                  <option value="paper">BANA/NLS paper braille</option>
+                  <option value="signage">ANSI/ADA signage braille</option>
+                </select>
               </label>
               <label>
-                Cell height Y px
-                <input id="cellHeight" type="number" min="12" max="260" step="0.5" value="72">
+                Image zoom
+                <input id="imageZoom" type="range" min="40" max="400" value="100">
+                <span id="imageZoomValue">100%</span>
               </label>
               <label>
-                Dot pitch
-                <input id="dotPitch" type="number" min="4" max="80" step="0.5" value="22">
+                Image X offset
+                <input id="imageOffsetX" type="range" min="-400" max="400" value="0">
+                <span id="imageOffsetXValue">0 px</span>
               </label>
               <label>
-                Cell gap
-                <input id="cellGap" type="number" min="1.4" max="4.5" step="0.1" value="2.4">
+                Image Y offset
+                <input id="imageOffsetY" type="range" min="-400" max="400" value="0">
+                <span id="imageOffsetYValue">0 px</span>
               </label>
               <label>
-                Row tolerance
-                <input id="rowTolerance" type="range" min="0.25" max="0.75" step="0.05" value="0.45">
-                <span id="rowToleranceValue">0.45</span>
+                Grid scale
+                <input id="gridScale" type="range" min="60" max="220" value="100">
+                <span id="gridScaleValue">100%</span>
               </label>
-              <button id="autoSpacing" type="button">Auto Fit</button>
+              <button id="autoFitGrid" type="button">Fit To Grid</button>
             </div>
 
             <div class="control-block stats">
