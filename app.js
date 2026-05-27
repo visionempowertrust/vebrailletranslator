@@ -364,8 +364,9 @@ function detectComponents(mask, width, height) {
   const dots = [];
   const { dotRadius } = getGridMetrics();
   const expectedDotArea = Math.PI * dotRadius * dotRadius;
-  const minArea = Math.max(2, expectedDotArea * 0.12);
-  const maxArea = Math.max(20, expectedDotArea * 4.5);
+  const embossedDots = controls.polarity.value === "light";
+  const minArea = embossedDots ? 4 : Math.max(2, expectedDotArea * 0.12);
+  const maxArea = embossedDots ? 900 : Math.max(20, expectedDotArea * 4.5);
   const queue = [];
 
   for (let y = 0; y < height; y += 1) {
@@ -816,11 +817,11 @@ function makeDemoImage() {
   const img = new Image();
   img.onload = () => {
     sourceImage = img;
-    sourceLabel = "demo-braille.png";
-    controls.polarity.value = "dark";
+    sourceLabel = "demo-braille.jpg";
+    controls.polarity.value = "light";
     controls.doubleSided.checked = false;
     controls.showBoxes.checked = true;
-    controls.threshold.value = "120";
+    controls.threshold.value = "90";
     controls.gridStandard.value = "paper";
     controls.imageZoom.value = "100";
     controls.imageOffsetX.value = "0";
@@ -832,7 +833,7 @@ function makeDemoImage() {
   img.onerror = () => {
     statusText.textContent = "Demo image could not be loaded.";
   };
-  img.src = "demo-braille.png";
+  img.src = "demo-braille.jpg";
 }
 
 function drawEmptyState() {

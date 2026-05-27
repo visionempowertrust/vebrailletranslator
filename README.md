@@ -55,4 +55,4 @@ http://127.0.0.1:5177/
 
 ## Demo
 
-The Demo button loads `demo-braille.png`, a dark printed Braille sample.
+The Demo button loads `demo-braille.jpg`, a white embossed Braille sample.
