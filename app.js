@@ -4,11 +4,14 @@ const imageInput = document.getElementById("imageInput");
 const outputText = document.getElementById("outputText");
 const statusText = document.getElementById("statusText");
 const engineStatus = document.getElementById("engineStatus");
+const selectedTableName = document.getElementById("selectedTableName");
+const selectedTableDescription = document.getElementById("selectedTableDescription");
 const dotCount = document.getElementById("dotCount");
 const reverseDotCount = document.getElementById("reverseDotCount");
 const cellCount = document.getElementById("cellCount");
 
 const controls = {
+  translationTable: document.getElementById("translationTable"),
   polarity: document.getElementById("polarity"),
   threshold: document.getElementById("threshold"),
   minArea: document.getElementById("minArea"),
@@ -58,10 +61,126 @@ const UEB_QUOTE_PREFIX_SYMBOLS = {
   52: "\""
 };
 
+const TRANSLATION_TABLES = [
+  {
+    id: "ueb-g1",
+    label: "English/Unified UEB Grade 1 (uncontracted)",
+    table: "en-ueb-g1.ctb",
+    description: "UEB English Grade 1 Braille without contractions"
+  },
+  {
+    id: "ueb-g2",
+    label: "English/Unified UEB Grade 2 (contracted)",
+    table: "en-ueb-g2.ctb",
+    description: "UEB English contracted Braille"
+  },
+  {
+    id: "en-us-g1",
+    label: "English/American Grade 1",
+    table: "en-us-g1.ctb",
+    description: "English/American uncontracted Braille"
+  },
+  {
+    id: "en-us-g2",
+    label: "English/American Grade 2",
+    table: "en-us-g2.ctb",
+    description: "English/American contracted Braille"
+  },
+  {
+    id: "en-gb-g1",
+    label: "English/British Grade 1",
+    table: "en-gb-g1.utb",
+    description: "English/British uncontracted Braille"
+  },
+  {
+    id: "en-gb-g2",
+    label: "English/British Grade 2",
+    table: "en-GB-g2.ctb",
+    description: "English/British contracted Braille"
+  },
+  {
+    id: "en-in-g1",
+    label: "English/India Grade 1",
+    table: "en-in-g1.ctb",
+    description: "English/India uncontracted Braille"
+  },
+  {
+    id: "hi-in-g1",
+    label: "Hindi/India Grade 1",
+    table: "hi-in-g1.utb",
+    description: "Hindi Bharati Braille Grade 1"
+  },
+  {
+    id: "ta-ta-g1",
+    label: "Tamil Grade 1",
+    table: "ta-ta-g1.ctb",
+    description: "Tamil Braille Grade 1"
+  },
+  {
+    id: "te-in-g1",
+    label: "Telugu/India Grade 1",
+    table: "te-in-g1.utb",
+    description: "Telugu Braille Grade 1"
+  },
+  {
+    id: "kn-in-g1",
+    label: "Kannada/India Grade 1",
+    table: "kn.tbl",
+    description: "Kannada Braille Grade 1"
+  },
+  {
+    id: "ml-in-g1",
+    label: "Malayalam/India Grade 1",
+    table: "ml-in-g1.utb",
+    description: "Malayalam Braille Grade 1"
+  },
+  {
+    id: "gu-in-g1",
+    label: "Gujarati/India Grade 1",
+    table: "gu-in-g1.utb",
+    description: "Gujarati Braille Grade 1"
+  },
+  {
+    id: "mr-in-g1",
+    label: "Marathi/India Grade 1",
+    table: "mr-in-g1.utb",
+    description: "Marathi Braille Grade 1"
+  },
+  {
+    id: "ur-pk-g1",
+    label: "Urdu/Pakistani Grade 1",
+    table: "ur-pk-g1.utb",
+    description: "Urdu Braille Grade 1"
+  }
+];
+
 let sourceImage = null;
 let sourceLabel = "";
 let processRunId = 0;
 let processTimer = 0;
+
+function populateTranslationTables() {
+  controls.translationTable.innerHTML = "";
+  for (const item of getTranslationTables()) {
+    const option = document.createElement("option");
+    option.value = item.id;
+    option.textContent = item.label;
+    controls.translationTable.append(option);
+  }
+  const defaultTable = getTranslationTables().find((item) => item.table === "en-ueb-g1.ctb");
+  if (defaultTable) controls.translationTable.value = defaultTable.id;
+}
+
+function getTranslationTables() {
+  return Array.isArray(window.LIBLOUIS_TABLE_CATALOG) && window.LIBLOUIS_TABLE_CATALOG.length
+    ? window.LIBLOUIS_TABLE_CATALOG
+    : TRANSLATION_TABLES;
+}
+
+function getSelectedTranslationTable() {
+  const tables = getTranslationTables();
+  return tables.find((item) => item.id === controls.translationTable.value) || tables[0];
+}
 
 function setEngineStatus(state, message) {
   engineStatus.dataset.state = state;
@@ -96,6 +215,11 @@ function syncReadouts() {
   readouts.minArea.textContent = `${controls.minArea.value} px`;
   readouts.maxArea.textContent = `${controls.maxArea.value} px`;
   readouts.rowTolerance.textContent = controls.rowTolerance.value;
+  if (controls.translationTable.options.length) {
+    const selectedTable = getSelectedTranslationTable();
+    selectedTableName.textContent = selectedTable.label;
+    selectedTableDescription.textContent = selectedTable.description;
+  }
 }
 
 function fitCanvasToImage(img) {
@@ -413,13 +537,18 @@ function patternToTextFallback(patterns) {
 }
 
 async function patternToText(patterns) {
+  const selectedTable = getSelectedTranslationTable();
   if (window.liblouisEngine) {
     try {
-      return await window.liblouisEngine.backTranslatePatterns(patterns);
+      return await window.liblouisEngine.backTranslatePatterns(patterns, selectedTable.table);
     } catch (error) {
       setEngineStatus("error", "Translation engine: local fallback");
       console.warn("Liblouis back-translation failed; using local fallback table.", error);
     }
+  }
+
+  if (selectedTable.id !== "ueb-g1") {
+    return `[${selectedTable.label} unavailable in fallback] ${patternToTextFallback(patterns)}`;
   }
 
   return patternToTextFallback(patterns);
@@ -553,7 +682,7 @@ async function processImage({ autoFit = false } = {}) {
   reverseDotCount.textContent = String(reverseDots.length);
   cellCount.textContent = String(totalCells);
   const engineText = window.liblouisEngine && window.liblouisEngine.ready
-    ? ` Liblouis ${window.liblouisEngine.version}.`
+    ? ` Liblouis ${window.liblouisEngine.version}; ${getSelectedTranslationTable().label}.`
     : " Local fallback table.";
   statusText.textContent = dots.length ? `${sourceLabel} processed.${engineText}` : "No dots found. Adjust threshold or dot color.";
 }
@@ -645,6 +774,7 @@ Object.values(controls).forEach((control) => {
   });
 });
 
+populateTranslationTables();
 syncReadouts();
 drawEmptyState();
 initializeTranslationEngine();

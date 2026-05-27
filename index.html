@@ -28,6 +28,10 @@
             <div class="control-block">
               <h2>Image Scan Options</h2>
               <label>
+                Translation table
+                <select id="translationTable"></select>
+              </label>
+              <label>
                 Braille print
                 <select id="polarity">
                   <option value="light">White Braille print</option>
@@ -108,8 +112,8 @@
             </div>
             <textarea id="outputText" spellcheck="false" placeholder="Translated text will appear here."></textarea>
             <div class="legend">
-              <span>UEB English Grade 1 Braille</span>
-              <span>No contractions; supports letters, number sign, capitalization, and common punctuation</span>
+              <span id="selectedTableName">UEB English Grade 1 Braille</span>
+              <span id="selectedTableDescription">No contractions; supports letters, number sign, capitalization, and common punctuation</span>
             </div>
           </section>
         </section>
@@ -117,6 +121,7 @@
     </main>
     <script src="liblouis-easy-api.js"></script>
     <script src="liblouis-engine.js"></script>
+    <script src="liblouis-table-catalog.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

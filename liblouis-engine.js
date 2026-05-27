@@ -1,6 +1,4 @@
 (function () {
-  const TABLE = "tables/unicode.dis,tables/en-ueb-g1.ctb";
-
   function call(api, method, ...args) {
     return new Promise((resolve, reject) => {
       const timer = window.setTimeout(() => {
@@ -57,10 +55,10 @@
       }
     },
 
-    async backTranslatePatterns(patterns) {
+    async backTranslatePatterns(patterns, tableName = "en-ueb-g1.ctb") {
       await this.init();
       const unicodeBraille = patternsToUnicode(patterns);
-      return call(this.api, "backTranslateString", TABLE, unicodeBraille);
+      return call(this.api, "backTranslateString", `tables/unicode.dis,tables/${tableName}`, unicodeBraille);
     },
 
     patternsToUnicode
