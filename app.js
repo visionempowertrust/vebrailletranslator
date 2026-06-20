@@ -9,6 +9,9 @@ const selectedTableDescription = document.getElementById("selectedTableDescripti
 const dotCount = document.getElementById("dotCount");
 const reverseDotCount = document.getElementById("reverseDotCount");
 const cellCount = document.getElementById("cellCount");
+const boxControls = document.getElementById("boxControls");
+const gridControls = document.getElementById("gridControls");
+const translationModeInputs = [...document.querySelectorAll('input[name="translationMode"]')];
 
 const controls = {
   translationTable: document.getElementById("translationTable"),
@@ -21,6 +24,9 @@ const controls = {
   dotPitch: document.getElementById("dotPitch"),
   cellGap: document.getElementById("cellGap"),
   rowTolerance: document.getElementById("rowTolerance"),
+  gridZoom: document.getElementById("gridZoom"),
+  gridOffsetX: document.getElementById("gridOffsetX"),
+  gridOffsetY: document.getElementById("gridOffsetY"),
   showBoxes: document.getElementById("showBoxes"),
   doubleSided: document.getElementById("doubleSided")
 };
@@ -29,7 +35,19 @@ const readouts = {
   threshold: document.getElementById("thresholdValue"),
   minArea: document.getElementById("minAreaValue"),
   maxArea: document.getElementById("maxAreaValue"),
-  rowTolerance: document.getElementById("rowToleranceValue")
+  rowTolerance: document.getElementById("rowToleranceValue"),
+  gridZoom: document.getElementById("gridZoomValue"),
+  gridOffsetX: document.getElementById("gridOffsetXValue"),
+  gridOffsetY: document.getElementById("gridOffsetYValue")
+};
+
+const DIGITAL_GRID = {
+  dotPitch: 10,
+  cellPitch: 25,
+  linePitch: 40,
+  originX: 20,
+  originY: 20,
+  dotRadius: 2
 };
 
 const UEB_GRADE1_SYMBOLS = {
@@ -159,6 +177,16 @@ let sourceLabel = "";
 let processRunId = 0;
 let processTimer = 0;
 
+function getTranslationMode() {
+  return translationModeInputs.find((input) => input.checked)?.value || "boxes";
+}
+
+function syncModeUI() {
+  const gridMode = getTranslationMode() === "grid";
+  boxControls.hidden = gridMode;
+  gridControls.hidden = !gridMode;
+}
+
 function populateTranslationTables() {
   controls.translationTable.innerHTML = "";
   for (const item of getTranslationTables()) {
@@ -215,6 +243,9 @@ function syncReadouts() {
   readouts.minArea.textContent = `${controls.minArea.value} px`;
   readouts.maxArea.textContent = `${controls.maxArea.value} px`;
   readouts.rowTolerance.textContent = controls.rowTolerance.value;
+  readouts.gridZoom.textContent = `${controls.gridZoom.value}%`;
+  readouts.gridOffsetX.textContent = `${controls.gridOffsetX.value} px`;
+  readouts.gridOffsetY.textContent = `${controls.gridOffsetY.value} px`;
   if (controls.translationTable.options.length) {
     const selectedTable = getSelectedTranslationTable();
     selectedTableName.textContent = selectedTable.label;
@@ -225,10 +256,18 @@ function syncReadouts() {
 function fitCanvasToImage(img) {
   const maxWidth = 1600;
   const ratio = Math.min(1, maxWidth / img.width);
-  canvas.width = Math.max(320, Math.round(img.width * ratio));
-  canvas.height = Math.max(240, Math.round(img.height * ratio));
+  const gridMode = getTranslationMode() === "grid";
+  const zoom = gridMode ? Number(controls.gridZoom.value) / 100 : 1;
+  const width = Math.round(img.width * ratio * zoom);
+  const height = Math.round(img.height * ratio * zoom);
+  canvas.width = Math.max(320, gridMode ? Math.round(img.width * ratio) : width);
+  canvas.height = Math.max(240, gridMode ? Math.round(img.height * ratio) : height);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "#fbfaf5";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const x = gridMode ? Number(controls.gridOffsetX.value) : 0;
+  const y = gridMode ? Number(controls.gridOffsetY.value) : 0;
+  ctx.drawImage(img, x, y, width, height);
 }
 
 function getBinaryMask(imageData, polarity = controls.polarity.value) {
@@ -540,14 +579,18 @@ async function patternToText(patterns) {
   const selectedTable = getSelectedTranslationTable();
   if (window.liblouisEngine) {
     try {
-      return await window.liblouisEngine.backTranslatePatterns(patterns, selectedTable.table);
+      const translated = await window.liblouisEngine.backTranslatePatterns(patterns, selectedTable.table);
+      if (typeof translated === "string" && (translated.trim() || !patterns.some(Boolean))) {
+        return translated;
+      }
+      throw new Error("Liblouis returned an empty translation for non-empty Braille cells.");
     } catch (error) {
       setEngineStatus("error", "Translation engine: local fallback");
       console.warn("Liblouis back-translation failed; using local fallback table.", error);
     }
   }
 
-  if (selectedTable.id !== "ueb-g1") {
+  if (selectedTable.table !== "en-ueb-g1.ctb") {
     return `[${selectedTable.label} unavailable in fallback] ${patternToTextFallback(patterns)}`;
   }
 
@@ -573,7 +616,7 @@ function mirrorCells(cells, width) {
   }));
 }
 
-async function translateDots(dots) {
+async function translateDotsByBoxes(dots) {
   const pitch = Number(controls.dotPitch.value);
   const tolerance = pitch * Number(controls.rowTolerance.value);
   const rowClusters = clusterValues(dots.map((dot) => dot.y), tolerance);
@@ -630,6 +673,92 @@ async function translateDots(dots) {
   };
 }
 
+function mapDotsToGrid(dots) {
+  const lineMap = new Map();
+  const tolerance = DIGITAL_GRID.dotPitch * 0.55;
+
+  for (const dot of dots) {
+    const lineIndex = Math.round((dot.y - DIGITAL_GRID.originY) / DIGITAL_GRID.linePitch);
+    const lineY = DIGITAL_GRID.originY + lineIndex * DIGITAL_GRID.linePitch;
+    const row = Math.round((dot.y - lineY) / DIGITAL_GRID.dotPitch);
+    if (lineIndex < 0 || row < 0 || row > 2) continue;
+    if (Math.abs(dot.y - (lineY + row * DIGITAL_GRID.dotPitch)) > tolerance) continue;
+
+    const cellIndex = Math.floor((dot.x - DIGITAL_GRID.originX + DIGITAL_GRID.cellPitch * 0.2) / DIGITAL_GRID.cellPitch);
+    if (cellIndex < 0) continue;
+    const cellX = DIGITAL_GRID.originX + cellIndex * DIGITAL_GRID.cellPitch;
+    const col = Math.abs(dot.x - (cellX + DIGITAL_GRID.dotPitch)) < Math.abs(dot.x - cellX) ? 1 : 0;
+    if (Math.abs(dot.x - (cellX + col * DIGITAL_GRID.dotPitch)) > tolerance) continue;
+
+    if (!lineMap.has(lineIndex)) lineMap.set(lineIndex, new Map());
+    const cells = lineMap.get(lineIndex);
+    cells.set(cellIndex, (cells.get(cellIndex) || 0) | (1 << (col * 3 + row)));
+  }
+
+  return lineMap;
+}
+
+async function translateDotsByGrid(dots) {
+  const lineMap = mapDotsToGrid(dots);
+  const pageLines = [];
+  const cells = [];
+  let cellsSeen = 0;
+
+  for (const [lineIndex, rowMap] of [...lineMap.entries()].sort((a, b) => a[0] - b[0])) {
+    const maxCell = Math.max(...rowMap.keys());
+    const patterns = [];
+    for (let cellIndex = 0; cellIndex <= maxCell; cellIndex += 1) {
+      const pattern = rowMap.get(cellIndex) || 0;
+      patterns.push(pattern);
+      if (pattern) {
+        cells.push({
+          pattern,
+          box: {
+            x: DIGITAL_GRID.originX + cellIndex * DIGITAL_GRID.cellPitch - 5,
+            y: DIGITAL_GRID.originY + lineIndex * DIGITAL_GRID.linePitch - 6,
+            width: 20,
+            height: 32
+          }
+        });
+      }
+    }
+    cellsSeen += patterns.length;
+    pageLines.push(await patternToText(patterns));
+  }
+
+  return { text: pageLines.join("\n"), cellsSeen, cells };
+}
+
+function drawMappingGrid() {
+  if (getTranslationMode() !== "grid") return;
+  const columns = Math.ceil((canvas.width - DIGITAL_GRID.originX) / DIGITAL_GRID.cellPitch);
+  const lines = Math.ceil((canvas.height - DIGITAL_GRID.originY) / DIGITAL_GRID.linePitch);
+
+  ctx.save();
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = "rgba(23, 32, 27, 0.28)";
+  ctx.fillStyle = "rgba(15, 118, 110, 0.22)";
+  for (let line = 0; line < lines; line += 1) {
+    const y = DIGITAL_GRID.originY + line * DIGITAL_GRID.linePitch;
+    for (let cell = 0; cell < columns; cell += 1) {
+      const x = DIGITAL_GRID.originX + cell * DIGITAL_GRID.cellPitch;
+      ctx.strokeRect(x - 5, y - 6, 20, 32);
+      for (let row = 0; row < 3; row += 1) {
+        for (let col = 0; col < 2; col += 1) {
+          ctx.beginPath();
+          ctx.arc(x + col * DIGITAL_GRID.dotPitch, y + row * DIGITAL_GRID.dotPitch, DIGITAL_GRID.dotRadius, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+  }
+  ctx.restore();
+}
+
+function translateDotsForMode(dots) {
+  return getTranslationMode() === "grid" ? translateDotsByGrid(dots) : translateDotsByBoxes(dots);
+}
+
 function drawCellOverlay(cells, color = "#0f766e", fill = "rgba(15, 118, 110, 0.08)") {
   if (!controls.showBoxes.checked) return;
   ctx.save();
@@ -652,8 +781,8 @@ async function processImage({ autoFit = false } = {}) {
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const mask = getBinaryMask(imageData);
   const dots = detectComponents(mask, canvas.width, canvas.height);
-  if (autoFit) autoEstimateSpacing(dots);
-  const primary = await translateDots(dots);
+  if (autoFit && getTranslationMode() === "boxes") autoEstimateSpacing(dots);
+  const primary = await translateDotsForMode(dots);
   if (runId !== processRunId) return;
   let output = primary.text;
   let reverseDots = [];
@@ -662,7 +791,7 @@ async function processImage({ autoFit = false } = {}) {
   if (controls.doubleSided.checked) {
     const reversePolarity = controls.polarity.value === "dark" ? "light" : "dark";
     reverseDots = detectComponents(getBinaryMask(imageData, reversePolarity), canvas.width, canvas.height);
-    const reverse = await translateDots(mirrorDots(reverseDots, canvas.width));
+    const reverse = await translateDotsForMode(mirrorDots(reverseDots, canvas.width));
     if (runId !== processRunId) return;
     totalCells += reverse.cellsSeen;
     output = [
@@ -676,6 +805,7 @@ async function processImage({ autoFit = false } = {}) {
     drawCellOverlay(reverse.cells, "#b45309", "rgba(180, 83, 9, 0.08)");
   }
 
+  drawMappingGrid();
   drawCellOverlay(primary.cells, "#0f766e", "rgba(15, 118, 110, 0.08)");
   outputText.value = output;
   dotCount.textContent = String(dots.length);
@@ -699,7 +829,10 @@ function loadImageFromFile(file) {
       controls.minArea.value = "8";
       controls.maxArea.value = "900";
       controls.cellWidth.value = "52";
-      controls.cellHeight.value = "72";
+    controls.cellHeight.value = "72";
+      controls.gridZoom.value = "100";
+      controls.gridOffsetX.value = "0";
+      controls.gridOffsetY.value = "0";
       syncReadouts();
       scheduleProcess({ autoFit: true });
     };
@@ -729,6 +862,9 @@ function makeDemoImage() {
     controls.cellHeight.value = "34";
     controls.dotPitch.value = "10";
     controls.cellGap.value = "2.4";
+    controls.gridZoom.value = "100";
+    controls.gridOffsetX.value = "0";
+    controls.gridOffsetY.value = "0";
     syncReadouts();
     scheduleProcess({ autoFit: true });
   };
@@ -758,6 +894,13 @@ imageInput.addEventListener("change", (event) => {
 
 document.getElementById("demoButton").addEventListener("click", makeDemoImage);
 document.getElementById("autoSpacing").addEventListener("click", () => scheduleProcess({ autoFit: true }));
+document.getElementById("resetGridAlignment").addEventListener("click", () => {
+  controls.gridZoom.value = "100";
+  controls.gridOffsetX.value = "0";
+  controls.gridOffsetY.value = "0";
+  syncReadouts();
+  scheduleProcess();
+});
 document.getElementById("copyButton").addEventListener("click", async () => {
   await navigator.clipboard.writeText(outputText.value);
   statusText.textContent = "Translation copied.";
@@ -774,7 +917,16 @@ Object.values(controls).forEach((control) => {
   });
 });
 
+translationModeInputs.forEach((input) => {
+  input.addEventListener("change", () => {
+    syncModeUI();
+    syncReadouts();
+    scheduleProcess();
+  });
+});
+
 populateTranslationTables();
+syncModeUI();
 syncReadouts();
 drawEmptyState();
 initializeTranslationEngine();

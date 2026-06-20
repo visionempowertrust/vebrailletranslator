@@ -23,6 +23,18 @@
           </div>
         </header>
 
+        <fieldset class="mode-switch" aria-label="Translation method">
+          <legend>Translation method</legend>
+          <label>
+            <input type="radio" name="translationMode" value="boxes" checked>
+            <span>Translation by box detection</span>
+          </label>
+          <label>
+            <input type="radio" name="translationMode" value="grid">
+            <span>Translation by grid mapping</span>
+          </label>
+        </fieldset>
+
         <section class="tool-grid">
           <aside class="controls" aria-label="Scan controls">
             <div class="control-block">
@@ -51,6 +63,10 @@
                 <input id="threshold" type="range" min="20" max="235" value="90">
                 <span id="thresholdValue">90</span>
               </label>
+            </div>
+
+            <div id="boxControls" class="control-block mode-controls">
+              <h2>Box Detection</h2>
               <label>
                 Minimum dot size
                 <input id="minArea" type="range" min="4" max="250" value="8">
@@ -61,9 +77,6 @@
                 <input id="maxArea" type="range" min="20" max="1400" value="900">
                 <span id="maxAreaValue">900 px</span>
               </label>
-            </div>
-
-            <div class="control-block">
               <h2>Spacing</h2>
               <label>
                 Cell width X px
@@ -87,6 +100,26 @@
                 <span id="rowToleranceValue">0.45</span>
               </label>
               <button id="autoSpacing" type="button">Auto Fit</button>
+            </div>
+
+            <div id="gridControls" class="control-block mode-controls" hidden>
+              <h2>Grid Mapping</h2>
+              <label>
+                Image zoom
+                <input id="gridZoom" type="range" min="40" max="300" value="100">
+                <span id="gridZoomValue">100%</span>
+              </label>
+              <label>
+                Move image X
+                <input id="gridOffsetX" type="range" min="-300" max="300" value="0">
+                <span id="gridOffsetXValue">0 px</span>
+              </label>
+              <label>
+                Move image Y
+                <input id="gridOffsetY" type="range" min="-300" max="300" value="0">
+                <span id="gridOffsetYValue">0 px</span>
+              </label>
+              <button id="resetGridAlignment" type="button">Reset Alignment</button>
             </div>
 
             <div class="control-block stats">

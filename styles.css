@@ -86,6 +86,42 @@ h2 {
   justify-content: flex-end;
 }
 
+.mode-switch {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin: 0;
+  padding: 12px 22px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+}
+
+.mode-switch legend {
+  padding: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.mode-switch label {
+  display: flex;
+  grid-template-columns: none;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+}
+
+.mode-switch input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
+[hidden] {
+  display: none !important;
+}
+
 button,
 .file-button {
   min-height: 40px;
@@ -275,6 +311,12 @@ canvas {
   .tool-grid {
     display: grid;
     grid-template-columns: 1fr;
+  }
+
+  .mode-switch {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
   }
 
   .controls,

@@ -6,7 +6,9 @@ Browser-based printed Braille scan translator with selectable Liblouis translati
 
 - Uploads a scanned Braille image.
 - Detects dark printed dots or white embossed Braille dots.
-- Groups detected dots into configurable Braille cells.
+- Offers two translation workflows:
+  - Box detection groups detected dots into configurable Braille cells.
+  - Grid mapping overlays a fixed six-dot digital grid while the image is zoomed and moved into alignment.
 - Back-translates Unicode Braille cell patterns with Liblouis.
 - Lets users choose the translation table, similar in spirit to DBT/Duxbury table selection.
 - Supports visible Braille cell boxes and double-sided scan processing.
@@ -44,3 +46,5 @@ http://127.0.0.1:5177/
 ## Demo
 
 The Demo button loads `demo-braille.jpg`, a white embossed Braille sample.
+
+In grid mapping mode, use Image zoom and the X/Y movement controls to align the sample dots with the six-dot grid before reading the result.
